@@ -10,33 +10,30 @@ struct HomeScreenItem: Identifiable {
 
 struct HomeScreenView: View {
     @State private var items: [HomeScreenItem] = [
-        // First row
         HomeScreenItem(name: "Calendar", imageName: "GoogleCalendar"),
         HomeScreenItem(name: "Safari", imageName: "safari"),
         HomeScreenItem(name: "Flighty", imageName: "flighty"),
         HomeScreenItem(name: "Instagram", imageName: "instagram"),
-        // Second row
         HomeScreenItem(name: "Find My", imageName: "findmy"),
         HomeScreenItem(name: "Facebook", imageName: "facebook"),
         HomeScreenItem(name: "Messenger", imageName: "messenger"),
         HomeScreenItem(name: "ChatGPT", imageName: "chatgpt"),
-        // Third row
         HomeScreenItem(name: "Spotify", imageName: "spotify"),
         HomeScreenItem(name: "TV", imageName: "tv")
     ]
     
+    @State private var isEditMode = false
     @State private var dragLocation: CGPoint = .zero
-    @State private var isDragging = false
     @State private var collectedItems = Set<UUID>()
     @State private var showTrashZone = false
-    
-    // Updated to flexible columns for adaptive spacing
+    @State private var isDragging = false
+
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 15), count: 4)
-    
+
     var body: some View {
         GeometryReader { geometry in
             ZStack {
-                // Background with proper stretching
+                // Background
                 Color.black
                     .ignoresSafeArea()
                     .overlay(
@@ -45,72 +42,81 @@ struct HomeScreenView: View {
                             .aspectRatio(contentMode: .fill)
                             .edgesIgnoringSafeArea(.all)
                     )
-                
+
                 VStack(spacing: 0) {
                     ScrollView {
                         LazyVGrid(columns: columns, spacing: 20) {
                             ForEach(items) { item in
                                 AppIconView(
                                     item: item,
-                                    isCollected: collectedItems.contains(item.id)
+                                    isCollected: collectedItems.contains(item.id),
+                                    isEditMode: isEditMode
                                 )
-                                .frame(maxWidth: .infinity)
-                                .overlay(
-                                    GeometryReader { itemGeometry in
-                                        Color.clear.onAppear {
-                                            if let index = items.firstIndex(where: { $0.id == item.id }) {
-                                                items[index].position = CGPoint(
-                                                    x: itemGeometry.frame(in: .global).midX,
-                                                    y: itemGeometry.frame(in: .global).midY
-                                                )
+                                .onLongPressGesture(minimumDuration: 0.5) {
+                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                        isEditMode = true
+                                    }
+                                }
+                                .gesture(
+                                    DragGesture()
+                                        .onChanged { value in
+                                            isDragging = true
+                                            dragLocation = value.location
+                                            if isEditMode {
+                                                collectItem(at: value.location)
                                             }
                                         }
-                                    }
+                                        .onEnded { value in
+                                            isDragging = false
+                                            if !collectedItems.isEmpty {
+                                                withAnimation {
+                                                    showTrashZone = true
+                                                }
+                                            }
+                                            if value.location.y > UIScreen.main.bounds.height - 150 && !collectedItems.isEmpty {
+                                                deleteCollectedItems()
+                                            } else {
+                                                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                                    collectedItems.removeAll()
+                                                    showTrashZone = false
+                                                }
+                                            }
+                                        }
                                 )
                             }
                         }
                         .padding(.top, 30)
-                        .padding(.horizontal, 10) // Reduced horizontal padding
+                        .padding(.horizontal, 10)
                     }
-                    
+
                     Spacer()
-                    
+
                     // Bottom container for search and dock
                     VStack(spacing: 6) {
-                        Spacer() // Pushes search and dock to the bottom
+                        Spacer()
 
-                        // Search pill - Corrected positioning & size
-                        Button(action: {
-                            // Define the search action here
-                            print("Search button tapped")
-                        }) {
-                            HStack(spacing: 4) { // Tighter space between icon and text
+                        // Search pill
+                        Button(action: {}) {
+                            HStack(spacing: 6) {
                                 Image(systemName: "magnifyingglass")
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundColor(.white)
-
+                                    .font(.system(size: 13))
                                 Text("Search")
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundColor(.white)
+                                    .font(.system(size: 13, weight: .semibold))
                             }
-                            .padding(.horizontal, 14) // Horizontal padding for capsule
-                            .padding(.vertical, 12)    // Vertical padding for capsule
-                            .background(
-                                Capsule()
-                                    .fill(Color.white.opacity(0.25))
-                            )
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(Color.white.opacity(0.2))
+                            .cornerRadius(20)
                         }
-                        .buttonStyle(PlainButtonStyle()) // Removes default button styling
-                        .fixedSize() // Ensures button hugs content width
-                        .padding(.bottom, 12) // Position closer to the dock
+                        .padding(.bottom, 16)
 
-
-                        // Dock with exact positioning, padding, and corner radius
+                        // Dock
                         ZStack {
                             RoundedRectangle(cornerRadius: 38)
                                 .fill(.ultraThinMaterial)
                                 .frame(height: 96)
-                                .padding(.horizontal, 16) // Ensures dock is 12px from sides
+                                .padding(.horizontal, 16)
                                 .shadow(radius: 5)
 
                             HStack(spacing: 24) {
@@ -121,24 +127,12 @@ struct HomeScreenView: View {
                             .padding(.horizontal, 20)
                             .padding(.vertical, 16)
                         }
-                        .padding(.bottom, 20) // Dock sits 12px from the bottom
+                        .padding(.bottom, 20)
                     }
-                    .frame(maxHeight: .infinity, alignment: .bottom) // Forces dock to bottom
-                    .ignoresSafeArea(.all, edges: .bottom) // Ignores safe area at bottom
-
-
-
+                    .frame(maxHeight: .infinity, alignment: .bottom)
+                    .ignoresSafeArea(.all, edges: .bottom)
                 }
-                
-                // Collection indicator
-                if isDragging {
-                    Circle()
-                        .fill(.white.opacity(0.3))
-                        .frame(width: 44, height: 44)
-                        .position(dragLocation)
-                }
-                
-                // Trash zone
+
                 if showTrashZone {
                     VStack {
                         Spacer()
@@ -146,7 +140,7 @@ struct HomeScreenView: View {
                             RoundedRectangle(cornerRadius: 22)
                                 .fill(.ultraThinMaterial)
                                 .frame(width: 200, height: 85)
-                            
+
                             VStack(spacing: 4) {
                                 Image(systemName: "trash.fill")
                                     .font(.system(size: 28))
@@ -161,56 +155,36 @@ struct HomeScreenView: View {
                     }
                 }
             }
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { value in
-                        isDragging = true
-                        dragLocation = value.location
-                        
-                        // Check for items to collect
-                        for item in items {
-                            let distance = sqrt(
-                                pow(dragLocation.x - item.position.x, 2) +
-                                pow(dragLocation.y - item.position.y, 2)
-                            )
-                            
-                            if distance < 35 && !collectedItems.contains(item.id) {
-                                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                                    collectedItems.insert(item.id)
-                                    let generator = UIImpactFeedbackGenerator(style: .light)
-                                    generator.impactOccurred()
-                                }
-                            }
-                        }
-                        
-                        if !collectedItems.isEmpty {
-                            withAnimation {
-                                showTrashZone = true
-                            }
-                        }
+            // Add tap gesture to exit edit mode
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if isEditMode {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        isEditMode = false
                     }
-                    .onEnded { value in
-                        isDragging = false
-                        
-                        if value.location.y > UIScreen.main.bounds.height - 150 && !collectedItems.isEmpty {
-                            deleteCollectedItems()
-                        } else {
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                                collectedItems.removeAll()
-                                showTrashZone = false
-                            }
-                        }
-                    }
-            )
+                }
+            }
         }
     }
-    
+
+    private func collectItem(at location: CGPoint) {
+        for item in items {
+            let distance = sqrt(pow(location.x - item.position.x, 2) + pow(location.y - item.position.y, 2))
+            if distance < 40 && !collectedItems.contains(item.id) {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                    collectedItems.insert(item.id)
+                    let generator = UIImpactFeedbackGenerator(style: .light)
+                    generator.impactOccurred()
+                }
+            }
+        }
+    }
+
     private func deleteCollectedItems() {
         withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
             items.removeAll { collectedItems.contains($0.id) }
             collectedItems.removeAll()
             showTrashZone = false
-            
             let generator = UINotificationFeedbackGenerator()
             generator.notificationOccurred(.success)
         }
@@ -220,28 +194,60 @@ struct HomeScreenView: View {
 struct AppIconView: View {
     let item: HomeScreenItem
     let isCollected: Bool
-    
+    let isEditMode: Bool
+    @State private var wiggle = false
+    @State private var wiggleOffset: Double = 0
+
     var body: some View {
-        VStack(spacing: 6) {
-            Image(item.imageName)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 65, height: 65) // Adjusted size
-                .cornerRadius(12)
+        VStack(spacing: 8) {
+            ZStack(alignment: .topLeading) {
+                Image(item.imageName)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 60, height: 60)
+                    .cornerRadius(12)
+                
+                if isEditMode {
+                    ZStack {
+                        Circle()
+                            .fill(Color.white.opacity(0.7))
+                            .frame(width: 22, height: 22)
+                        
+                        Image(systemName: "minus")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundColor(.black)
+                    }
+                    .offset(x: -8, y: -8)
+                }
+            }
             
             Text(item.name)
                 .font(.system(size: 12))
-                .foregroundStyle(.white)
+                .foregroundColor(.white)
+                .lineLimit(1)
         }
-        .opacity(isCollected ? 0.6 : 1.0)
-        .scaleEffect(isCollected ? 0.8 : 1.0)
-        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isCollected)
+        .rotationEffect(.degrees(wiggle ? -5.5 + wiggleOffset : 0))
+        .offset(x: wiggle ? -1.5 + CGFloat(wiggleOffset/2) : 0)
+        .onChange(of: isEditMode) { oldValue, newValue in
+            if newValue {
+                wiggleOffset = Double.random(in: 3.0...5.5)
+                withAnimation(Animation.easeInOut(duration: 0.12)
+                    .repeatForever(autoreverses: true)
+                    .delay(Double.random(in: 0...0.05))) {
+                    wiggle = true
+                }
+            } else {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                    wiggle = false
+                }
+            }
+        }
     }
 }
 
 struct DockIcon: View {
     let imageName: String
-    
+
     var body: some View {
         Image(imageName)
             .resizable()
