@@ -86,7 +86,7 @@ struct HomeScreenView: View {
                             }
                         }
                         .padding(.top, 30)
-                        .padding(.horizontal, 10)
+                        .padding(.horizontal, 30)
                     }
 
                     Spacer()
@@ -226,14 +226,12 @@ struct AppIconView: View {
                 .foregroundColor(.white)
                 .lineLimit(1)
         }
-        .rotationEffect(.degrees(wiggle ? -5.5 + wiggleOffset : 0))
-        .offset(x: wiggle ? -1.5 + CGFloat(wiggleOffset/2) : 0)
+        .rotationEffect(.degrees(isEditMode ? (wiggle ? 1.5 : -1.5) : 0))  // Normal state stays at 0
         .onChange(of: isEditMode) { oldValue, newValue in
             if newValue {
-                wiggleOffset = Double.random(in: 3.0...5.5)
-                withAnimation(Animation.easeInOut(duration: 0.12)
+                withAnimation(Animation.easeInOut(duration: 0.11)
                     .repeatForever(autoreverses: true)
-                    .delay(Double.random(in: 0...0.05))) {
+                    .delay(Double.random(in: 0...0.03))) {
                     wiggle = true
                 }
             } else {
