@@ -87,7 +87,7 @@ struct HomeScreenView: View {
                             }
                         }
                         .padding(.top, 30)
-                        .padding(.horizontal, 10)
+                        .padding(.horizontal, 35)
                     }
 
                     Spacer()
