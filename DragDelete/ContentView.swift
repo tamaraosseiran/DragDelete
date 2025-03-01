@@ -23,10 +23,13 @@ struct HomeScreenView: View {
     ]
     
     @State private var isEditMode = false
-    @State private var dragLocation: CGPoint = .zero
+    @State private var draggedItem: HomeScreenItem?
+    @State private var draggedOffset = CGSize.zero
+    @State private var positions: [UUID: CGPoint] = [:]
     @State private var collectedItems = Set<UUID>()
     @State private var showTrashZone = false
     @State private var isDragging = false
+    @State private var dragLocation: CGPoint = .zero
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 15), count: 4)
 
@@ -63,22 +66,20 @@ struct HomeScreenView: View {
                                             isDragging = true
                                             dragLocation = value.location
                                             if isEditMode {
-                                                collectItem(at: value.location)
+                                                draggedItem = item
+                                                draggedOffset = value.translation
                                             }
                                         }
-                                        .onEnded { value in
+                                        .onEnded { _ in
                                             isDragging = false
-                                            if !collectedItems.isEmpty {
+                                            if let draggedItem = draggedItem {
                                                 withAnimation {
-                                                    showTrashZone = true
-                                                }
-                                            }
-                                            if value.location.y > UIScreen.main.bounds.height - 150 && !collectedItems.isEmpty {
-                                                deleteCollectedItems()
-                                            } else {
-                                                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                                                    collectedItems.removeAll()
-                                                    showTrashZone = false
+                                                    positions[draggedItem.id] = CGPoint(
+                                                        x: positions[draggedItem.id, default: .zero].x + draggedOffset.width,
+                                                        y: positions[draggedItem.id, default: .zero].y + draggedOffset.height
+                                                    )
+                                                    self.draggedItem = nil
+                                                    draggedOffset = .zero
                                                 }
                                             }
                                         }
@@ -86,7 +87,7 @@ struct HomeScreenView: View {
                             }
                         }
                         .padding(.top, 30)
-                        .padding(.horizontal, 30)
+                        .padding(.horizontal, 10)
                     }
 
                     Spacer()
@@ -226,10 +227,10 @@ struct AppIconView: View {
                 .foregroundColor(.white)
                 .lineLimit(1)
         }
-        .rotationEffect(.degrees(isEditMode ? (wiggle ? 1.5 : -1.5) : 0))  // Normal state stays at 0
+        .rotationEffect(.degrees(isEditMode ? (wiggle ? 1.3 : -1.3) : 0))  // Normal state stays at 0
         .onChange(of: isEditMode) { oldValue, newValue in
             if newValue {
-                withAnimation(Animation.easeInOut(duration: 0.11)
+                withAnimation(Animation.easeInOut(duration: 0.13)
                     .repeatForever(autoreverses: true)
                     .delay(Double.random(in: 0...0.03))) {
                     wiggle = true
