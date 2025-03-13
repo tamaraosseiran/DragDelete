@@ -457,6 +457,21 @@ struct HomeScreenView: View {
                         .position(x: trashPosition.x, y: trashPosition.y - 50)
                         .zIndex(1000)
                 }
+                
+                // Render particles
+                if showParticles {
+                    ForEach(0..<particlePositions.count, id: \.self) { index in
+                        particleView(at: index)
+                    }
+                }
+                
+                // Add this at the END of your main ZStack to ensure it's on top
+                if showPoofEffect {
+                    PoofEffect()
+                        .frame(width: 200, height: 200)
+                        .position(x: trashPosition.x, y: trashPosition.y - 60)
+                        .zIndex(1000) // Very high z-index to ensure it's on top
+                }
             }
             .contentShape(Rectangle())
             .onTapGesture {
@@ -529,6 +544,11 @@ struct HomeScreenView: View {
         }
         // Force a fixed frame size regardless of content
         .frame(width: 26, height: 26)
+    }
+    
+    // Helper function to calculate distance between points
+    func distance(from point1: CGPoint, to point2: CGPoint) -> CGFloat {
+        return hypot(point1.x - point2.x, point1.y - point2.y)
     }
 }
 
