@@ -55,8 +55,10 @@ struct HomeScreenView: View {
     @State private var showPoofEffect = false
     @State private var trashFrame: CGRect = .zero
     @State private var isTrashFull: Bool = false
+    @State private var magneticPullActive = false
+    @State private var dragItemScale: CGFloat = 1.0
     
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 15), count: 4)
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 4)
     
     func updateStackOffsets() {
         // Calculate time delta for smooth physics
@@ -203,295 +205,319 @@ struct HomeScreenView: View {
     
     var body: some View {
         GeometryReader { geometry in
-            ZStack {
-                // Background
-                Color.black.ignoresSafeArea()
-                    .overlay(
-                        Image("background")
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .edgesIgnoringSafeArea(.all)
-                    )
-
-                VStack(spacing: 0) {
-                    ScrollView {
-                        LazyVGrid(columns: columns, spacing: 20) {
-                            ForEach(items.indices, id: \.self) { index in
-                                let item = items[index]
-                                
-                                AppIconView(
-                                    item: item,
-                                    isCollected: false,
-                                    isEditMode: isEditMode
-                                )
-                                .opacity(isDragging && collectedItems.contains(item.id) ? 0 : 1)
-                                .scaleEffect(collectAnimation == item.id ? 1.1 : 1.0)
-                                .animation(.spring(response: 0.3), value: collectAnimation == item.id)
-                                .background(
-                                    GeometryReader { geo in
-                                        Color.clear.onAppear {
-                                            let frame = geo.frame(in: .global)
-                                            appPositions[item.id] = CGPoint(x: frame.midX, y: frame.midY)
-                                            appFrames[item.id] = frame
-                                        }
-                                    }
-                                )
-                                .overlay(
-                                    // Black semi-transparent overlay when near finger
-                                    ZStack {
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .fill(Color.black.opacity(0.3))
-                                            .frame(width: 75, height: 90)
-                                            .opacity(
-                                                isDragging &&
-                                                !collectedItems.contains(item.id) &&
-                                                distance(from: fingerLocation, to: appPositions[item.id] ?? .zero) < 100 ?
-                                                1 : 0
-                                            )
-                                    }
-                                )
-                                .onChange(of: collectAnimation) { oldValue, newValue in
-                                    if newValue == item.id {
-                                        // Reset collection animation after a delay
-                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                            if collectAnimation == item.id {
-                                                collectAnimation = nil
-                                            }
-                                        }
-                                    }
-                                }
-                                .gesture(
-                                    DragGesture()
-                                        .onChanged { gesture in
-                                            guard isEditMode else { return }
-                                            
-                                            // Update finger location
-                                            fingerLocation = gesture.location
-                                            
-                                            // Start dragging
-                                            if !isDragging {
-                                                isDragging = true
-                                                draggedItem = item
-                                                collectedItems.insert(item.id)
-                                                previousFingerLocation = fingerLocation
-                                                lastUpdateTime = Date()
-                                                
-                                                withAnimation(.spring(response: 0.3)) {
-                                                    showTrashZone = true
-                                                }
-                                                
-                                                // Initial haptic feedback
-                                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                                                
-                                                // When drag begins, prepare for potential deletion animation
-                                                for id in collectedItems {
-                                                    // Calculate a unique angle for each item to fan out
-                                                    let angle = Double.random(in: -0.5...0.5)
-                                                    
-                                                    // Calculate rotation - alternating directions and speeds
-                                                    let rotation = Double.random(in: -360...360)
-                                                    
-                                                    // Store the animation parameters (empty CGPoint will be filled during deletion)
-                                                    flyAwayOffsets[id] = (.zero, angle, rotation)
-                                                }
-                                            }
-                                            
-                                            // Update stack offsets based on movement
-                                            updateStackOffsets()
-                                            
-                                            // Check for collecting other apps
-                                            checkCollision()
-                                            
-                                            // Check if over trash using the frame
-                                            let dragPosition = gesture.location
-                                            isOverTrash = trashFrame.contains(dragPosition)
-                                        }
-                                        .onEnded { value in
-                                            if isOverTrash && !collectedItems.isEmpty {
-                                                // Very short delay before showing poof (just enough to register the drop)
-                                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                                                    withAnimation {
-                                                        showPoofEffect = true
-                                                    }
-                                                    
-                                                    // Delete items during the poof animation
-                                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                                                        // Delete items as poof is expanding
-                                                        items.removeAll { collectedItems.contains($0.id) }
-                                                        
-                                                        // Reset states
-                                                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                                                            isDragging = false
-                                                            draggedItem = nil
-                                                            collectedItems.removeAll()
-                                                            isOverTrash = false
-                                                        }
-                                                        
-                                                        // Let poof complete before hiding
-                                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                                                            withAnimation {
-                                                                showPoofEffect = false
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            } else {
-                                                // Not over trash, just reset
-                                                withAnimation {
-                                                    isDragging = false
-                                                    draggedItem = nil
-                                                    collectedItems.removeAll()
-                                                    isOverTrash = false
-                                                }
-                                            }
-                                        }
-                                )
-                            }
-                        }
-                        .padding(.top, 30)
-                        .padding(.horizontal, 45)
-                    }
-                    
-                    Spacer()
-                    
-                    // floating dock
-                    if isEditMode {
-                        VStack {
-                            Spacer()
-                            
-                            // Dock container - no poof effect here
-                            ZStack {
-                                RoundedRectangle(cornerRadius: 25)
-                                    .fill(
-                                        .ultraThinMaterial
-                                        .opacity(0.7)
-                                    )
-                                    .frame(width: UIScreen.main.bounds.width * 0.82, height: 108)
-                                
-                                // Trash icon with state
-                                if isTrashFull {
-                                    Image("trash-full")
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fit)
-                                        .frame(width: 60, height: 60)
-                                        .opacity(isOverTrash ? 1.0 : 0.95)
-                                        .scaleEffect(isOverTrash ? 1.2 : 1.0)
-                                } else {
-                                    Image("trashcan")
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fit)
-                                        .frame(width: 60, height: 60)
-                                        .opacity(isOverTrash ? 1.0 : 0.95)
-                                        .scaleEffect(isOverTrash ? 1.2 : 1.0)
-                                }
-                            }
-                            .padding(.vertical, 24)
-                            .padding(.bottom, 20)
-                            .frame(maxWidth: .infinity)
-                            .background(
-                                GeometryReader { geometry -> Color in
-                                    DispatchQueue.main.async {
-                                        let frame = geometry.frame(in: .global)
-                                        trashPosition = CGPoint(
-                                            x: frame.midX,
-                                            y: frame.midY
-                                        )
-                                        trashSize = CGSize(
-                                            width: UIScreen.main.bounds.width * 0.82,
-                                            height: 108
-                                        )
-                                        
-                                        // IMPORTANT: Create a much larger and better positioned hit area
-                                        // Move it up significantly and make it taller
-                                        trashFrame = CGRect(
-                                            x: frame.midX - (frame.width / 2),
-                                            // Shift up by 60 points to make the visual center more accurate
-                                            y: frame.midY - 60 - (frame.height / 2),
-                                            width: frame.width,
-                                            // Make the hit area much taller (double height + extra)
-                                            height: frame.height * 2 + 40
-                                        )
-                                    }
-                                    return Color.clear
-                                }
-                            )
-                            .overlay(
-                                Group {
-                                    if isEditMode && false { // Set to true only during development
-                                        Rectangle()
-                                            .stroke(Color.red, lineWidth: 2)
-                                            .frame(
-                                                width: trashFrame.width,
-                                                height: trashFrame.height
-                                            )
-                                            .position(
-                                                x: trashPosition.x,
-                                                y: trashPosition.y - 60 // Match the offset from above
-                                            )
-                                    }
-                                }
-                            )
-                        }
-                        .transition(.opacity)
-                        .zIndex(100)
-                        .ignoresSafeArea(edges: .bottom)
-                    }
-                }
-                
-                // Card stack with physics-based trailing but maintaining alignment
-                if isDragging {
-                    DraggedItemsView()
-                }
-                
-                // Render particles
-                if showParticles {
-                    ForEach(0..<particlePositions.count, id: \.self) { index in
-                        particleView(at: index)
-                    }
-                }
-                
-                // Completely separate poof effect overlay
-                if showPoofEffect {
-                    PoofEffect()
-                        .frame(width: 150, height: 150)
-                        .position(x: trashPosition.x, y: trashPosition.y - 50)
-                        .zIndex(1000)
-                }
-                
-                // Render particles
-                if showParticles {
-                    ForEach(0..<particlePositions.count, id: \.self) { index in
-                        particleView(at: index)
-                    }
-                }
-                
-                // Add this at the END of your main ZStack to ensure it's on top
-                if showPoofEffect {
-                    PoofEffect()
-                        .frame(width: 200, height: 200)
-                        .position(x: trashPosition.x, y: trashPosition.y - 60)
-                        .zIndex(1000) // Very high z-index to ensure it's on top
-                }
-            }
-            .contentShape(Rectangle())
-            .onTapGesture {
+            mainContentView(geometry: geometry)
+        }
+    }
+    
+    private func mainContentView(geometry: GeometryProxy) -> some View {
+        ZStack {
+            // Background
+            backgroundView()
+            
+            // Main content
+            VStack(spacing: 0) {
+                appGridView()
+                Spacer()
                 if isEditMode {
-                    withAnimation {
-                        isEditMode = false
-                    }
+                    trashDockView()
                 }
             }
-            .onLongPressGesture {
+            
+            // Dragged items layer
+            if isDragging {
+                DraggedItemsView()
+            }
+            
+            // Particles layer
+            if showParticles {
+                particlesLayer()
+            }
+            
+            // Poof effect
+            if showPoofEffect {
+                PoofEffect()
+                    .frame(width: 200, height: 200)
+                    .position(x: trashPosition.x, y: trashPosition.y - 60)
+                    .zIndex(1000)
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if isEditMode {
                 withAnimation {
-                    isEditMode = true
+                    isEditMode = false
                 }
+            }
+        }
+        .onLongPressGesture {
+            withAnimation {
+                isEditMode = true
             }
         }
     }
     
-    // Helper function to calculate distance between points
-    func distance(from point1: CGPoint, to point2: CGPoint) -> CGFloat {
-        return hypot(point1.x - point2.x, point1.y - point2.y)
+    private func backgroundView() -> some View {
+        Color.black.ignoresSafeArea()
+            .overlay(
+                Image("background")
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .edgesIgnoringSafeArea(.all)
+            )
+    }
+    
+    private func appGridView() -> some View {
+        ScrollView {
+            LazyVGrid(columns: columns, spacing: 12) {
+                ForEach(items.indices, id: \.self) { index in
+                    appIconCell(item: items[index])
+                }
+            }
+            .padding(.top, 30)
+            .padding(.horizontal, 24)
+        }
+    }
+    
+    private func appIconCell(item: HomeScreenItem) -> some View {
+        AppIconView(
+            item: item,
+            isCollected: false,
+            isEditMode: isEditMode
+        )
+        .opacity(isDragging && collectedItems.contains(item.id) ? 0 : 1)
+        .scaleEffect(collectAnimation == item.id ? 1.1 : 1.0)
+        .animation(.spring(response: 0.3), value: collectAnimation == item.id)
+        .background(
+            GeometryReader { geo in
+                Color.clear.onAppear {
+                    let frame = geo.frame(in: .global)
+                    appPositions[item.id] = CGPoint(x: frame.midX, y: frame.midY)
+                    appFrames[item.id] = frame
+                }
+            }
+        )
+        .overlay(
+            // Black semi-transparent overlay when near finger
+            ZStack {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color.black.opacity(0.3))
+                    .frame(width: 75, height: 90)
+                    .opacity(
+                        isDragging &&
+                        !collectedItems.contains(item.id) &&
+                        distance(from: fingerLocation, to: appPositions[item.id] ?? .zero) < 100 ?
+                        1 : 0
+                    )
+            }
+        )
+        .onChange(of: collectAnimation) { oldValue, newValue in
+            if newValue == item.id {
+                // Reset collection animation after a delay
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    if collectAnimation == item.id {
+                        collectAnimation = nil
+                    }
+                }
+            }
+        }
+        .gesture(createDragGesture(for: item))
+    }
+    
+    private func createDragGesture(for item: HomeScreenItem) -> some Gesture {
+        DragGesture()
+            .onChanged { gesture in
+                guard isEditMode else { return }
+                
+                // Original finger location before any magnetic adjustments
+                let originalLocation = gesture.location
+                
+                // Calculate distance to trash
+                let distanceToTrash = distance(from: originalLocation, to: trashPosition)
+                let magneticRange: CGFloat = 250 // Increased range for more noticeable effect
+                let pullStrength: CGFloat = 0.4 // Stronger pull (increased from 0.3)
+                
+                // Apply magnetic effect when close to trash
+                if distanceToTrash < magneticRange {
+                    // Calculate pull factor - stronger as we get closer
+                    let pullFactor = pow((magneticRange - distanceToTrash) / magneticRange, 2) * pullStrength
+                    
+                    // Direction vector toward trash
+                    let directionX = trashPosition.x - originalLocation.x
+                    let directionY = trashPosition.y - originalLocation.y
+                    
+                    // Apply magnetic pull - adjust finger position toward trash
+                    fingerLocation = CGPoint(
+                        x: originalLocation.x + directionX * pullFactor,
+                        y: originalLocation.y + directionY * pullFactor
+                    )
+                    
+                    // Gradually reduce scale as we get closer to trash (more dramatic scaling)
+                    dragItemScale = max(0.6, 1.0 - (pullFactor * 0.7))
+                    
+                    // Set flag for visual feedback
+                    magneticPullActive = true
+                    
+                    // Add haptic feedback for magnetic pull
+                    if pullFactor > 0.3 && !isOverTrash {
+                        UIImpactFeedbackGenerator(style: .soft).impactOccurred(intensity: CGFloat(Float(pullFactor)))
+                    }
+                } else {
+                    // No magnetic effect
+                    fingerLocation = originalLocation
+                    dragItemScale = 1.0
+                    magneticPullActive = false
+                }
+                
+                // Rest of your existing onChanged handler...
+                if !isDragging {
+                    isDragging = true
+                    draggedItem = item
+                    collectedItems.insert(item.id)
+                    previousFingerLocation = fingerLocation
+                    lastUpdateTime = Date()
+                    
+                    withAnimation(.spring(response: 0.3)) {
+                        showTrashZone = true
+                    }
+                    
+                    // Initial haptic feedback
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    
+                    // When drag begins, prepare for potential deletion animation
+                    for id in collectedItems {
+                        // Calculate a unique angle for each item to fan out
+                        let angle = Double.random(in: -0.5...0.5)
+                        
+                        // Calculate rotation - alternating directions and speeds
+                        let rotation = Double.random(in: -360...360)
+                        
+                        // Store the animation parameters (empty CGPoint will be filled during deletion)
+                        flyAwayOffsets[id] = (.zero, angle, rotation)
+                    }
+                }
+                
+                // Update stack offsets based on movement
+                updateStackOffsets()
+                
+                // Check for collecting other apps
+                checkCollision()
+                
+                // Check if over trash using the frame
+                isOverTrash = trashFrame.contains(fingerLocation)
+            }
+            .onEnded { value in
+                if isOverTrash && !collectedItems.isEmpty {
+                    // Very short delay before showing poof (just enough to register the drop)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        withAnimation {
+                            showPoofEffect = true
+                        }
+                        
+                        // Delete items during the poof animation
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                            // Delete items as poof is expanding
+                            items.removeAll { collectedItems.contains($0.id) }
+                            
+                            // Reset states
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                isDragging = false
+                                draggedItem = nil
+                                collectedItems.removeAll()
+                                isOverTrash = false
+                            }
+                            
+                            // Let poof complete before hiding
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                                withAnimation {
+                                    showPoofEffect = false
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Not over trash, just reset
+                    withAnimation {
+                        isDragging = false
+                        draggedItem = nil
+                        collectedItems.removeAll()
+                        isOverTrash = false
+                    }
+                }
+            }
+    }
+    
+    private func particlesLayer() -> some View {
+        ForEach(0..<particlePositions.count, id: \.self) { index in
+            particleView(at: index)
+        }
+    }
+    
+    private func trashDockView() -> some View {
+        VStack {
+            Spacer()
+            
+            // Dock container
+            ZStack {
+                RoundedRectangle(cornerRadius: 25)
+                    .fill(
+                        .ultraThinMaterial
+                        .opacity(0.7)
+                    )
+                    .frame(width: UIScreen.main.bounds.width * 0.82, height: 108)
+                
+                // Trash icon with state
+                if isTrashFull {
+                    Image("trash-full")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 60, height: 60)
+                        .opacity(isOverTrash || magneticPullActive ? 1.0 : 0.95)
+                        .scaleEffect(isOverTrash ? 1.2 : (magneticPullActive ? 1.1 : 1.0))
+                        .animation(.interactiveSpring(response: 0.3, dampingFraction: 0.7), value: [isOverTrash, magneticPullActive])
+                } else {
+                    Image("trashcan")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 60, height: 60)
+                        .opacity(isOverTrash || magneticPullActive ? 1.0 : 0.95)
+                        .scaleEffect(isOverTrash ? 1.2 : (magneticPullActive ? 1.1 : 1.0))
+                        .animation(.interactiveSpring(response: 0.3, dampingFraction: 0.7), value: [isOverTrash, magneticPullActive])
+                }
+            }
+            .padding(.vertical, 24)
+            .padding(.bottom, 20)
+            .frame(maxWidth: .infinity)
+            .background(
+                GeometryReader { geometry -> Color in
+                    DispatchQueue.main.async {
+                        let frame = geometry.frame(in: .global)
+                        trashPosition = CGPoint(
+                            x: frame.midX,
+                            y: frame.midY
+                        )
+                        trashSize = CGSize(
+                            width: UIScreen.main.bounds.width * 0.82,
+                            height: 108
+                        )
+                        
+                        // IMPORTANT: Create a much larger and better positioned hit area
+                        // Move it up significantly and make it taller
+                        trashFrame = CGRect(
+                            x: frame.midX - (frame.width / 2),
+                            // Shift up by 60 points to make the visual center more accurate
+                            y: frame.midY - 60 - (frame.height / 2),
+                            width: frame.width,
+                            // Make the hit area much taller (double height + extra)
+                            height: frame.height * 2 + 40
+                        )
+                    }
+                    return Color.clear
+                }
+            )
+        }
+        .transition(.opacity)
+        .zIndex(100)
+        .ignoresSafeArea(edges: .bottom)
     }
     
     private func DraggedItemsView() -> some View {
@@ -526,7 +552,6 @@ struct HomeScreenView: View {
         .position(fingerLocation)
     }
     
-    // Updated CounterBadgeView to ensure perfect circle shape
     private func CounterBadgeView(count: Int) -> some View {
         ZStack {
             // Perfect circle with fixed size
@@ -547,7 +572,7 @@ struct HomeScreenView: View {
     }
     
     // Helper function to calculate distance between points
-    func distance(from point1: CGPoint, to point2: CGPoint) -> CGFloat {
+    private func distance(from point1: CGPoint, to point2: CGPoint) -> CGFloat {
         return hypot(point1.x - point2.x, point1.y - point2.y)
     }
 }
